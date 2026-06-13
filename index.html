@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>FitPro AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <!-- React -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #060610; font-family: 'DM Sans', 'Segoe UI', sans-serif; color: #f1f5f9; }
+    input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #8b5cf644; border-radius: 99px; }
+    @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+
+// ─── Firebase Config ──────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyB8ipQog_VUan22FjDMIKfUng-LB0Bt6_E",
+  authDomain: "fitproai-fa5ec.firebaseapp.com",
+  projectId: "fitproai-fa5ec",
+  storageBucket: "fitproai-fa5ec.firebasestorage.app",
+  messagingSenderId: "735401094599",
+  appId: "1:735401094599:web:588d43769d71793baefde2"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+const ADMIN_EMAIL = "soulom13@gmail.com";
+const WHATSAPP = "917820961204";
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Design Tokens ────────────────────────────────────────────────────────────
+const T = {
+  bg:"#060610",bg2:"#0d0d1f",bg3:"#12122a",
+  card:"rgba(255,255,255,0.04)",border:"rgba(255,255,255,0.08)",
+  purple:"#8b5cf6",pink:"#ec4899",green:"#10b981",cyan:"#06b6d4",
+  amber:"#f59e0b",red:"#ef4444",text:"#f1f5f9",muted:"#94a3b8",dim:"#475569",
+  grad:"linear-gradient(135deg,#8b5cf6,#ec4899)",
+  gradGreen:"linear-gradient(135deg,#10b981,#06b6d4)",
+  r:"14px",rLg:"20px",font:"'DM Sans','Segoe UI',sans-serif"
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const today = () => new Date().toISOString().split("T")[0];
+const fmtDate = d => new Date(d).toLocaleDateString("en-IN",{day:"numeric",month:"short"});
+const uid = () => Math.random().toString(36).slice(2,10).toUpperCase();
+const clamp = (v,mn,mx) => Math.max(mn,Math.min(mx,v));
+
+function calcBMI(w,h){ if(!w||!h) return 0; return +(w/((h/100)**2)).toFixed(1); }
+function bmiLabel(b){ if(b<18.5) return["Underweight",T.cyan]; if(b<25) return["Normal",T.green]; if(b<30) return["Overweight",T.amber]; return["Obese",T.red]; }
+function calcCalGoal(w,h,age,gender,activity,goal){
+  if(!w) return 2000;
+  const bmr = gender==="Female"?10*w+6.25*h-5*age-161:10*w+6.25*h-5*age+5;
+  const af = {Sedentary:1.2,Light:1.375,Moderate:1.55,Active:1.725,VeryActive:1.9}[activity]||1.55;
+  const tdee = bmr*af;
+  const adj = {"Fat Loss":-500,Cutting:-600,"Muscle Gain":300,Bulking:500,Strength:200,Maintain:0}[goal]||0;
+  return Math.round(tdee+adj);
+}
+function calcProtein(w,goal){
+  const mul = {"Muscle Gain":2.2,Bulking:2.0,Strength:2.0,Cutting:2.4,"Fat Loss":1.8,Maintain:1.6}[goal]||1.8;
+  return Math.round((w||70)*mul);
+}
+
+// ─── Indian Food Database (100+ foods) ───────────────────────────────────────
+const INDIAN_FOODS = [
+  {name:"Dal Makhani (1 katori)",cal:198,p:9,c:24,f:7},
+  {name:"Roti/Chapati (1 piece)",cal:80,p:3,c:15,f:1},
+  {name:"Chawal/Rice (1 katori)",cal:206,p:4,c:45,f:0},
+  {name:"Paneer (100g)",cal:296,p:18,c:3,f:24},
+  {name:"Poha (1 plate)",cal:244,p:5,c:48,f:3},
+  {name:"Chole (1 katori)",cal:269,p:14,c:45,f:4},
+  {name:"Rajma (1 katori)",cal:227,p:15,c:40,f:1},
+  {name:"Dahi/Curd (1 katori)",cal:98,p:6,c:9,f:3},
+  {name:"Aloo Sabji (1 katori)",cal:149,p:3,c:28,f:3},
+  {name:"Palak Paneer (1 katori)",cal:280,p:14,c:12,f:20},
+  {name:"Biryani (1 plate)",cal:450,p:18,c:65,f:12},
+  {name:"Samosa (1 piece)",cal:262,p:4,c:32,f:13},
+  {name:"Paratha (1 piece)",cal:145,p:4,c:22,f:5},
+  {name:"Idli (2 pieces)",cal:130,p:4,c:26,f:1},
+  {name:"Dosa (1 piece)",cal:168,p:4,c:30,f:4},
+  {name:"Upma (1 plate)",cal:230,p:6,c:40,f:5},
+  {name:"Puri (1 piece)",cal:120,p:2,c:16,f:5},
+  {name:"Aloo Paratha (1 piece)",cal:200,p:5,c:30,f:7},
+  {name:"Banana (1 medium)",cal:90,p:1,c:23,f:0},
+  {name:"Apple (1 medium)",cal:82,p:0,c:22,f:0},
+  {name:"Orange (1 medium)",cal:62,p:1,c:15,f:0},
+  {name:"Egg (1 whole)",cal:78,p:6,c:1,f:5},
+  {name:"Egg White (1)",cal:17,p:4,c:0,f:0},
+  {name:"Chicken Breast (100g)",cal:165,p:31,c:0,f:4},
+  {name:"Chicken Curry (1 katori)",cal:280,p:22,c:8,f:18},
+  {name:"Fish Curry (1 katori)",cal:210,p:24,c:6,f:10},
+  {name:"Mutton Curry (1 katori)",cal:320,p:26,c:5,f:22},
+  {name:"Oats (1 bowl cooked)",cal:158,p:6,c:27,f:3},
+  {name:"Milk (1 glass 250ml)",cal:149,p:8,c:12,f:8},
+  {name:"Chai with milk (1 cup)",cal:60,p:2,c:8,f:2},
+  {name:"Lassi sweet (1 glass)",cal:180,p:6,c:28,f:5},
+  {name:"Lassi salty (1 glass)",cal:120,p:6,c:14,f:4},
+  {name:"Moong Dal (1 katori)",cal:147,p:10,c:25,f:1},
+  {name:"Toor Dal (1 katori)",cal:168,p:11,c:29,f:1},
+  {name:"Peanuts (30g handful)",cal:170,p:8,c:5,f:14},
+  {name:"Almonds (10 pieces)",cal:70,p:3,c:3,f:6},
+  {name:"Mango (1 medium)",cal:150,p:1,c:38,f:1},
+  {name:"Watermelon (1 slice)",cal:46,p:1,c:11,f:0},
+  {name:"Butter (1 tsp)",cal:36,p:0,c:0,f:4},
+  {name:"Ghee (1 tsp)",cal:45,p:0,c:0,f:5},
+  {name:"Bread (1 slice white)",cal:67,p:2,c:13,f:1},
+  {name:"Brown Bread (1 slice)",cal:69,p:3,c:12,f:1},
+  {name:"Pav Bhaji (1 plate)",cal:380,p:9,c:58,f:13},
+  {name:"Vada Pav (1 piece)",cal:286,p:6,c:44,f:9},
+  {name:"Maggi (1 packet)",cal:340,p:8,c:50,f:12},
+  {name:"Protein Shake (1 scoop)",cal:120,p:25,c:3,f:2},
+  {name:"Sprouts (1 katori)",cal:86,p:8,c:15,f:1},
+  {name:"Corn (1 katori)",cal:132,p:5,c:29,f:2},
+  {name:"Sweet Potato (1 medium)",cal:112,p:2,c:26,f:0},
+  {name:"Besan Chilla (1 piece)",cal:180,p:10,c:22,f:5},
+];
+
+// ─── Exercises DB ─────────────────────────────────────────────────────────────
+const EXERCISES = {
+  Chest:["Bench Press","Incline Bench Press","Decline Bench Press","Push-ups","Dumbbell Flyes","Cable Crossover","Chest Dips","Pec Deck","Incline Dumbbell Press","Close Grip Bench"],
+  Back:["Deadlift","Pull-ups","Lat Pulldown","Seated Cable Row","Barbell Row","T-Bar Row","Single Arm Row","Face Pull","Rack Pull","Hyperextension"],
+  Shoulders:["Overhead Press","Arnold Press","Lateral Raise","Front Raise","Rear Delt Fly","Upright Row","Military Press","Cable Lateral Raise","Face Pull","Machine Press"],
+  Legs:["Squat","Leg Press","Romanian Deadlift","Leg Curl","Leg Extension","Lunges","Bulgarian Split Squat","Hack Squat","Calf Raise","Goblet Squat"],
+  Biceps:["Barbell Curl","Dumbbell Curl","Hammer Curl","Preacher Curl","Cable Curl","Concentration Curl","EZ Bar Curl","Incline Dumbbell Curl","Zottman Curl","21s"],
+  Triceps:["Skull Crushers","Tricep Pushdown","Overhead Tricep Extension","Close Grip Bench","Dips","Diamond Push-ups","Kickbacks","Rope Pushdown","French Press","Tate Press"],
+  Core:["Plank","Crunches","Leg Raises","Russian Twists","Ab Wheel","Cable Crunch","Hanging Leg Raise","Bicycle Crunch","Hollow Hold","Dead Bug"],
+  Cardio:["Running","Cycling","Jump Rope","HIIT","Stair Climber","Elliptical","Walking","Sprint Intervals","Burpees","Jumping Jacks"],
+};
+const BODY_PARTS = Object.keys(EXERCISES);
+
+// ─── AI API ───────────────────────────────────────────────────────────────────
+async function callAI(messages, systemPrompt, json=false){
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:systemPrompt,messages})
+    });
+    const data = await res.json();
+    const text = (data.content||[]).filter(c=>c.type==="text").map(c=>c.text).join("");
+    if(json){ const cleaned=text.replace(/```json|```/g,"").trim(); return JSON.parse(cleaned); }
+    return text;
+  } catch(e){ return json?null:"AI se response nahi aaya. Please try again."; }
+}
+
+// ─── UI Components ────────────────────────────────────────────────────────────
+function Btn({children,onClick,style,variant="primary",disabled,small}){
+  const base={border:"none",cursor:disabled?"not-allowed":"pointer",fontFamily:T.font,fontWeight:600,borderRadius:T.r,transition:"opacity .15s",opacity:disabled?0.5:1,padding:small?"8px 16px":"13px 22px",fontSize:small?"13px":"15px"};
+  const variants={primary:{background:T.grad,color:"#fff"},secondary:{background:T.card,color:T.text,border:`1px solid ${T.border}`},ghost:{background:"transparent",color:T.muted,border:`1px solid ${T.border}`},danger:{background:T.red,color:"#fff"},green:{background:T.gradGreen,color:"#fff"}};
+  return <button onClick={disabled?undefined:onClick} style={{...base,...variants[variant],...style}}>{children}</button>;
+}
+function Card({children,style,onClick}){
+  return <div onClick={onClick} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:T.rLg,padding:"16px",cursor:onClick?"pointer":"default",...style}}>{children}</div>;
+}
+function Input({label,value,onChange,type="text",placeholder,style,min,max,step}){
+  return(
+    <div style={{marginBottom:"14px",...style}}>
+      {label&&<div style={{color:T.muted,fontSize:"12px",marginBottom:"6px",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>{label}</div>}
+      <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} min={min} max={max} step={step}
+        style={{width:"100%",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"12px 14px",fontSize:"15px",fontFamily:T.font,outline:"none",boxSizing:"border-box"}}/>
+    </div>
+  );
+}
+function Select({label,value,onChange,options,style}){
+  return(
+    <div style={{marginBottom:"14px",...style}}>
+      {label&&<div style={{color:T.muted,fontSize:"12px",marginBottom:"6px",fontWeight:600,letterSpacing:".5px",textTransform:"uppercase"}}>{label}</div>}
+      <select value={value} onChange={e=>onChange(e.target.value)}
+        style={{width:"100%",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"12px 14px",fontSize:"15px",fontFamily:T.font,outline:"none",boxSizing:"border-box",appearance:"none"}}>
+        {options.map(o=><option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+function ProgressBar({value,max,color,height=8,style}){
+  const pct=max>0?clamp((value/max)*100,0,100):0;
+  return(
+    <div style={{background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden",height,...style}}>
+      <div style={{width:`${pct}%`,height:"100%",background:color||T.grad,borderRadius:99,transition:"width .4s"}}/>
+    </div>
+  );
+}
+function Badge({label,color,style}){
+  return <span style={{background:color?`${color}22`:"rgba(255,255,255,0.06)",color:color||T.muted,border:`1px solid ${color?`${color}44`:T.border}`,borderRadius:99,padding:"3px 10px",fontSize:"11px",fontWeight:700,letterSpacing:".3px",...style}}>{label}</span>;
+}
+function Toast({msg,type="info"}){
+  const colors={info:T.cyan,success:T.green,error:T.red,warning:T.amber};
+  if(!msg) return null;
+  return <div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",background:colors[type],color:"#fff",padding:"10px 20px",borderRadius:T.r,fontWeight:700,fontSize:"13px",zIndex:9999,whiteSpace:"nowrap",boxShadow:"0 4px 20px rgba(0,0,0,.5)",animation:"fadeIn .2s"}}>{msg}</div>;
+}
+function Chip({label,active,onClick}){
+  return <button onClick={onClick} style={{background:active?T.grad:T.card,color:active?"#fff":T.muted,border:`1px solid ${active?"transparent":T.border}`,borderRadius:99,padding:"7px 14px",fontSize:"13px",fontWeight:600,cursor:"pointer",fontFamily:T.font,transition:"all .15s",whiteSpace:"nowrap"}}>{label}</button>;
+}
+function TypingDots(){
+  return <div style={{display:"flex",gap:4,alignItems:"center",padding:"4px 0"}}>{[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:T.purple,animation:`bounce 1.2s ${i*0.2}s infinite`}}/>)}</div>;
+}
+function Spinner(){
+  return <div style={{width:24,height:24,borderRadius:"50%",border:`3px solid ${T.border}`,borderTopColor:T.purple,animation:"spin 0.8s linear infinite",margin:"20px auto"}}/>;
+}
+function ProgressBar2({value,max,color,height=8,style}){
+  const pct=max>0?clamp((value/max)*100,0,100):0;
+  return(
+    <div style={{background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden",height,...style}}>
+      <div style={{width:`${pct}%`,height:"100%",background:color||T.grad,borderRadius:99,transition:"width .4s"}}/>
+    </div>
+  );
+}
+
+// ─── Firebase Hooks ───────────────────────────────────────────────────────────
+function useFirestore(collection, uid){
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(()=>{
+    if(!uid){ setLoading(false); return; }
+    const unsub = db.collection(collection).doc(uid).onSnapshot(snap=>{
+      setData(snap.exists ? snap.data() : {});
+      setLoading(false);
+    });
+    return ()=>unsub();
+  },[collection,uid]);
+  const save = useCallback(async(newData)=>{
+    if(!uid) return;
+    await db.collection(collection).doc(uid).set(newData,{merge:true});
+  },[collection,uid]);
+  return [data,save,loading];
+}
+
+// ─── SVG Charts ───────────────────────────────────────────────────────────────
+function LineChart({data,goal,color=T.purple}){
+  if(!data||data.length<2) return <div style={{color:T.dim,textAlign:"center",padding:"40px 0",fontSize:"13px"}}>Not enough data yet</div>;
+  const W=320,H=140,pad=30;
+  const vals=data.map(d=>d.value);
+  const mn=Math.min(...vals,goal||Infinity)*0.9;
+  const mx=Math.max(...vals,goal||0)*1.1||10;
+  const px=i=>pad+(i/(data.length-1))*(W-pad*2);
+  const py=v=>H-pad-((v-mn)/(mx-mn))*(H-pad*2);
+  const pts=data.map((d,i)=>`${px(i)},${py(d.value)}`).join(" ");
+  const fillPts=`${px(0)},${H-pad} ${pts} ${px(data.length-1)},${H-pad}`;
+  const gid=`g${Math.random().toString(36).slice(2)}`;
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto"}}>
+      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.3"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
+      <polygon points={fillPts} fill={`url(#${gid})`}/>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
+      {goal&&<line x1={pad} y1={py(goal)} x2={W-pad} y2={py(goal)} stroke={T.amber} strokeWidth="1.5" strokeDasharray="5,4"/>}
+      {data.map((d,i)=><text key={i} x={px(i)} y={H-6} textAnchor="middle" fill={T.dim} fontSize="9">{d.label}</text>)}
+      <circle cx={px(data.length-1)} cy={py(vals[vals.length-1])} r="5" fill={color} stroke={T.bg} strokeWidth="2"/>
+    </svg>
+  );
+}
+function BarChart({data,color=T.purple}){
+  if(!data||data.length===0) return null;
+  const mx=Math.max(...data.map(d=>d.value),1);
+  return(
+    <div style={{display:"flex",alignItems:"flex-end",gap:6,height:80,padding:"0 4px"}}>
+      {data.map((d,i)=>(
+        <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+          <div style={{width:"100%",background:color+"33",borderRadius:"4px 4px 0 0",position:"relative",height:60}}>
+            <div style={{position:"absolute",bottom:0,left:0,right:0,background:color,borderRadius:"4px 4px 0 0",height:`${(d.value/mx)*100}%`,transition:"height .4s"}}/>
+          </div>
+          <div style={{fontSize:9,color:T.dim,textAlign:"center"}}>{d.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
+function AuthScreen({onAuth}){
+  const [mode,setMode]=useState("login");
+  const [email,setEmail]=useState("");
+  const [pass,setPass]=useState("");
+  const [name,setName]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+
+  async function handleSubmit(){
+    setLoading(true); setErr("");
+    try{
+      if(mode==="login"){
+        const cred = await auth.signInWithEmailAndPassword(email,pass);
+        onAuth(cred.user);
+      } else {
+        const cred = await auth.createUserWithEmailAndPassword(email,pass);
+        await db.collection("users").doc(cred.user.uid).set({
+          email, name, createdAt: new Date().toISOString(),
+          isAdmin: email===ADMIN_EMAIL,
+          sub: { status:"trial", trialEnd: new Date(Date.now()+7*86400000).toISOString() }
+        });
+        onAuth(cred.user);
+      }
+    } catch(e){
+      const msgs = {
+        "auth/user-not-found":"Email nahi mila. Signup karo!",
+        "auth/wrong-password":"Wrong password!",
+        "auth/email-already-in-use":"Email already registered hai!",
+        "auth/weak-password":"Password kam se kam 6 characters ka hona chahiye!",
+        "auth/invalid-email":"Valid email daalo!",
+      };
+      setErr(msgs[e.code]||e.message);
+    }
+    setLoading(false);
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:T.font,color:T.text}}>
+      <div style={{fontSize:52,marginBottom:12}}>💪</div>
+      <div style={{fontSize:28,fontWeight:900,background:T.grad,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:4}}>FitPro AI</div>
+      <div style={{color:T.muted,fontSize:"13px",marginBottom:32}}>Your AI Fitness Coach 🇮🇳</div>
+      <Card style={{width:"100%",maxWidth:380}}>
+        <div style={{display:"flex",gap:8,marginBottom:20}}>
+          {["login","signup"].map(m=><Chip key={m} label={m==="login"?"Login":"Sign Up"} active={mode===m} onClick={()=>setMode(m)}/>)}
+        </div>
+        {mode==="signup"&&<Input label="Full Name" value={name} onChange={setName} placeholder="Aapka naam"/>}
+        <Input label="Email" value={email} onChange={setEmail} type="email" placeholder="email@example.com"/>
+        <Input label="Password" value={pass} onChange={setPass} type="password" placeholder="Min 6 characters"/>
+        {err&&<div style={{color:T.red,fontSize:"12px",marginBottom:12,background:`${T.red}11`,borderRadius:8,padding:"8px 12px"}}>{err}</div>}
+        <Btn onClick={handleSubmit} disabled={loading} style={{width:"100%"}}>
+          {loading?<Spinner/>:mode==="login"?"🔓 Login":"🚀 Create Account"}
+        </Btn>
+        {mode==="signup"&&<div style={{fontSize:"11px",color:T.muted,textAlign:"center",marginTop:10}}>7-day free trial • No credit card required</div>}
+      </Card>
+    </div>
+  );
+}
+
+// ─── ONBOARDING ───────────────────────────────────────────────────────────────
+function Onboarding({user,onDone}){
+  const [step,setStep]=useState(0);
+  const [form,setForm]=useState({name:"",age:"25",gender:"Male",height:"170",weight:"70",level:"Beginner",goal:"Fat Loss",diet:"Non-Veg",activity:"Moderate",sleep:"7",water:"3"});
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  const steps=[
+    <div key={0} style={{textAlign:"center",padding:"20px 0"}}>
+      <div style={{fontSize:56,marginBottom:16}}>💪</div>
+      <div style={{fontSize:28,fontWeight:800,background:T.grad,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:8}}>FitPro AI</div>
+      <div style={{color:T.muted,fontSize:"15px",marginBottom:30,lineHeight:1.6}}>Aapka personal AI fitness coach — Hindi, English, ya Hinglish mein!</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,textAlign:"left"}}>
+        {["🤖 AI-powered workout & nutrition analysis","🍛 Indian diet — dal, roti, sabji sab!","📊 Smart progress tracking","💬 Hindi/Hinglish/English coach","🏆 Badges, streaks & gamification","✅ 7-day free trial"].map((f,i)=>(
+          <div key={i} style={{display:"flex",gap:10,alignItems:"center",background:T.card,borderRadius:T.r,padding:"12px 14px",border:`1px solid ${T.border}`}}>
+            <span style={{fontSize:18}}>{f.split(" ")[0]}</span>
+            <span style={{color:T.text,fontSize:"14px",flex:1}}>{f.slice(f.indexOf(" ")+1)}</span>
+          </div>
+        ))}
+      </div>
+    </div>,
+    <div key={1}>
+      <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Personal Details</div>
+      <div style={{color:T.muted,fontSize:"13px",marginBottom:20}}>Aapke baare mein batao</div>
+      <Input label="Aapka naam" value={form.name} onChange={v=>set("name",v)} placeholder="e.g. Rahul, Priya..."/>
+      <Input label="Umra (years)" value={form.age} onChange={v=>set("age",v)} type="number"/>
+      <Select label="Gender" value={form.gender} onChange={v=>set("gender",v)} options={["Male","Female","Other"]}/>
+      <Input label="Height (cm)" value={form.height} onChange={v=>set("height",v)} type="number"/>
+      <Input label="Weight (kg)" value={form.weight} onChange={v=>set("weight",v)} type="number"/>
+    </div>,
+    <div key={2}>
+      <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Fitness Profile</div>
+      <div style={{color:T.muted,fontSize:"13px",marginBottom:20}}>Apna level aur goal choose karo</div>
+      <Select label="Fitness Level" value={form.level} onChange={v=>set("level",v)} options={["Beginner","Intermediate","Advanced"]}/>
+      <Select label="Primary Goal" value={form.goal} onChange={v=>set("goal",v)} options={["Fat Loss","Muscle Gain","Strength","Cutting","Bulking","Maintain"]}/>
+      <Select label="Diet Preference" value={form.diet} onChange={v=>set("diet",v)} options={["Non-Veg","Veg","Vegan","Eggetarian","Keto"]}/>
+    </div>,
+    <div key={3}>
+      <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Lifestyle</div>
+      <div style={{color:T.muted,fontSize:"13px",marginBottom:20}}>Routine ke baare mein batao</div>
+      <Select label="Activity Level" value={form.activity} onChange={v=>set("activity",v)} options={["Sedentary","Light","Moderate","Active","VeryActive"]}/>
+      <Input label="Neend (hours)" value={form.sleep} onChange={v=>set("sleep",v)} type="number" step="0.5"/>
+      <Input label="Paani goal (liters)" value={form.water} onChange={v=>set("water",v)} type="number" step="0.5"/>
+      {(()=>{
+        const cal=calcCalGoal(+form.weight,+form.height,+form.age,form.gender,form.activity,form.goal);
+        const prot=calcProtein(+form.weight,form.goal);
+        return(
+          <div style={{background:`${T.green}11`,border:`1px solid ${T.green}33`,borderRadius:T.r,padding:"14px"}}>
+            <div style={{fontSize:"12px",color:T.green,fontWeight:700,marginBottom:8}}>✅ Auto-Calculated Goals</div>
+            <div style={{display:"flex",gap:16}}>
+              <div><div style={{fontSize:20,fontWeight:800}}>{cal}</div><div style={{fontSize:"11px",color:T.muted}}>kcal/day</div></div>
+              <div><div style={{fontSize:20,fontWeight:800}}>{prot}g</div><div style={{fontSize:"11px",color:T.muted}}>protein/day</div></div>
+              <div><div style={{fontSize:20,fontWeight:800}}>{form.water}L</div><div style={{fontSize:"11px",color:T.muted}}>water/day</div></div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  ];
+
+  async function handleNext(){
+    if(step<steps.length-1){setStep(s=>s+1);return;}
+    const w=+form.weight,h=+form.height,age=+form.age;
+    const calGoal=calcCalGoal(w,h,age,form.gender,form.activity,form.goal);
+    const protGoal=calcProtein(w,form.goal);
+    const profile={...form,weight:w,height:h,age,calGoal,protGoal,waterGoal:+form.water,sleepGoal:+form.sleep,setupDone:true};
+    await db.collection("users").doc(user.uid).set(profile,{merge:true});
+    onDone(profile);
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:T.bg,fontFamily:T.font,color:T.text,display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"60px 24px 24px",flex:1,maxWidth:480,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+        <div style={{display:"flex",gap:6,marginBottom:30}}>
+          {steps.map((_,i)=><div key={i} style={{flex:1,height:4,borderRadius:99,background:i<=step?T.grad:T.bg3,transition:"background .3s"}}/>)}
+        </div>
+        {steps[step]}
+      </div>
+      <div style={{padding:"16px 24px 36px",display:"flex",gap:12,maxWidth:480,margin:"0 auto",width:"100%",boxSizing:"border-box"}}>
+        {step>0&&<Btn variant="secondary" onClick={()=>setStep(s=>s-1)} style={{flex:1}}>← Back</Btn>}
+        <Btn onClick={handleNext} disabled={step===1&&!form.name.trim()} style={{flex:2}}>
+          {step===steps.length-1?"🚀 Start Journey":"Next →"}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+// ─── PAYWALL ──────────────────────────────────────────────────────────────────
+function Paywall({user,profile,onActivate}){
+  const [code,setCode]=useState("");
+  const [msg,setMsg]=useState("");
+
+  async function tryActivate(){
+    const snap = await db.collection("codes").doc(code).get();
+    if(snap.exists&&!snap.data().used){
+      const days=snap.data().days||30;
+      await db.collection("codes").doc(code).update({used:true,usedBy:user.uid,usedAt:new Date().toISOString()});
+      const expiresAt=new Date(Date.now()+days*86400000).toISOString();
+      await db.collection("users").doc(user.uid).set({sub:{status:"active",activatedAt:new Date().toISOString(),expiresAt}},{merge:true});
+      onActivate();
+    } else {
+      setMsg("❌ Invalid or already used code!");
+    }
+  }
+
+  return(
+    <div style={{minHeight:"100vh",background:T.bg,fontFamily:T.font,color:T.text,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{fontSize:48,marginBottom:16}}>🔒</div>
+      <div style={{fontSize:24,fontWeight:800,marginBottom:8,textAlign:"center"}}>Trial Expired!</div>
+      <div style={{color:T.muted,textAlign:"center",marginBottom:30,fontSize:"14px",lineHeight:1.8}}>Subscribe karo aur fitness journey continue karo! 💪</div>
+      <Card style={{width:"100%",maxWidth:400,marginBottom:20}}>
+        <div style={{textAlign:"center",marginBottom:16}}>
+          <div style={{fontSize:32,fontWeight:900,background:T.grad,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>₹299<span style={{fontSize:16}}>/month</span></div>
+          <div style={{color:T.muted,fontSize:"12px"}}>Ek din mein sirf ₹10 — ek chai se bhi kam! ☕</div>
+        </div>
+        <a href={`upi://pay?pa=fitpro@upi&pn=FitPro AI&am=299&cu=INR`} style={{display:"block",background:T.grad,color:"#fff",textAlign:"center",padding:"13px",borderRadius:T.r,fontWeight:700,textDecoration:"none",marginBottom:10}}>💳 Pay ₹299 via UPI</a>
+        <a href={`https://wa.me/${WHATSAPP}?text=Hi! I paid for FitPro AI. Name: ${profile?.name}. Please activate.`} target="_blank" style={{display:"block",background:"#25D366",color:"#fff",textAlign:"center",padding:"13px",borderRadius:T.r,fontWeight:700,textDecoration:"none"}}>📱 WhatsApp Screenshot Bhejo</a>
+      </Card>
+      <Card style={{width:"100%",maxWidth:400}}>
+        <div style={{fontSize:"13px",color:T.muted,marginBottom:10}}>Got activation code?</div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={code} onChange={e=>setCode(e.target.value.toUpperCase())} placeholder="Enter code" style={{flex:1,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"10px 12px",fontFamily:T.font,fontSize:"14px",outline:"none"}}/>
+          <Btn onClick={tryActivate} small>Activate</Btn>
+        </div>
+        {msg&&<div style={{color:T.red,fontSize:"12px",marginTop:8}}>{msg}</div>}
+      </Card>
+    </div>
+  );
+}
+
+// ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
+function AdminPanel({onClose}){
+  const [tab,setTab]=useState("dashboard");
+  const [users,setUsers]=useState([]);
+  const [codes,setCodes]=useState({});
+  const [config,setConfig]=useState({amount:299,trialDays:7,upiId:"fitpro@upi",whatsapp:WHATSAPP});
+  const [newCode,setNewCode]=useState(null);
+  const [msg,setMsg]=useState("");
+  const [loading,setLoading]=useState(true);
+
+  const toast=(m,t="success")=>{setMsg({m,t});setTimeout(()=>setMsg(""),2500);};
+
+  useEffect(()=>{
+    db.collection("users").onSnapshot(snap=>{
+      setUsers(snap.docs.map(d=>({id:d.id,...d.data()})));
+      setLoading(false);
+    });
+    db.collection("codes").onSnapshot(snap=>{
+      const c={};
+      snap.docs.forEach(d=>c[d.id]=d.data());
+      setCodes(c);
+    });
+    db.collection("appConfig").doc("main").onSnapshot(snap=>{
+      if(snap.exists) setConfig(snap.data());
+    });
+  },[]);
+
+  async function generateCode(){
+    const code=uid();
+    await db.collection("codes").doc(code).set({days:30,used:false,createdAt:new Date().toISOString()});
+    setNewCode(code);
+  }
+
+  async function activateUser(userId,days){
+    const expiresAt=new Date(Date.now()+days*86400000).toISOString();
+    await db.collection("users").doc(userId).set({sub:{status:"active",activatedAt:new Date().toISOString(),expiresAt}},{merge:true});
+    toast(`✅ User activated for ${days} days!`);
+  }
+
+  async function saveConfig(){
+    await db.collection("appConfig").doc("main").set(config,{merge:true});
+    toast("✅ Config saved!");
+  }
+
+  const activeUsers=users.filter(u=>u.sub?.status==="active").length;
+  const revenue=activeUsers*(config.amount||299);
+
+  return(
+    <div style={{position:"fixed",inset:0,background:T.bg,zIndex:1000,fontFamily:T.font,color:T.text,display:"flex",flexDirection:"column"}}>
+      <Toast msg={msg?.m} type={msg?.t}/>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"54px 20px 16px",background:T.bg2,borderBottom:`1px solid ${T.border}`}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800}}>🛡️ Admin Panel</div>
+          <div style={{fontSize:"11px",color:T.muted}}>FitPro AI — Real Database</div>
+        </div>
+        <Btn variant="ghost" onClick={onClose} small>✕ Close</Btn>
+      </div>
+      <div style={{display:"flex",gap:8,padding:"12px 16px",overflowX:"auto",borderBottom:`1px solid ${T.border}`}}>
+        {[{id:"dashboard",label:"📊 Stats"},{id:"users",label:"👥 Users"},{id:"codes",label:"🔑 Codes"},{id:"config",label:"⚙️ Config"}].map(t=><Chip key={t.id} label={t.label} active={tab===t.id} onClick={()=>setTab(t.id)}/>)}
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        {loading&&<Spinner/>}
+        {!loading&&tab==="dashboard"&&(
+          <div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+              {[{label:"Total Users",value:users.length,color:T.purple},{label:"Active",value:activeUsers,color:T.green},{label:"Revenue Est.",value:`₹${revenue}`,color:T.amber},{label:"Codes",value:Object.keys(codes).length,color:T.cyan}].map(s=>(
+                <Card key={s.label}><div style={{fontSize:24,fontWeight:900,color:s.color}}>{s.value}</div><div style={{fontSize:"12px",color:T.muted}}>{s.label}</div></Card>
+              ))}
+            </div>
+          </div>
+        )}
+        {!loading&&tab==="users"&&(
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {users.length===0&&<div style={{color:T.dim,textAlign:"center",padding:40}}>No users yet</div>}
+            {users.map(u=><AdminUserCard key={u.id} u={u} onActivate={activateUser}/>)}
+          </div>
+        )}
+        {!loading&&tab==="codes"&&(
+          <div>
+            <Btn onClick={generateCode} style={{width:"100%",marginBottom:16}}>+ Generate Code (30 days)</Btn>
+            {newCode&&(
+              <Card style={{marginBottom:16,background:`${T.green}11`,border:`1px solid ${T.green}33`}}>
+                <div style={{fontSize:"12px",color:T.green,marginBottom:6}}>✅ New Code!</div>
+                <div style={{fontFamily:"monospace",fontSize:20,fontWeight:800,letterSpacing:3,marginBottom:10}}>{newCode}</div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn small onClick={()=>navigator.clipboard?.writeText(newCode)}>📋 Copy</Btn>
+                  <a href={`https://wa.me/?text=FitPro AI Activation Code: ${newCode} (30 days) 🎉`} target="_blank" style={{background:"#25D366",color:"#fff",padding:"8px 14px",borderRadius:T.r,fontSize:"13px",fontWeight:700,textDecoration:"none"}}>📱 WhatsApp</a>
+                </div>
+              </Card>
+            )}
+            {Object.entries(codes).reverse().map(([c,info])=>(
+              <Card key={c} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{fontFamily:"monospace",fontWeight:700}}>{c}</div>
+                  <Badge label={info.used?"Used":"Active"} color={info.used?T.red:T.green}/>
+                </div>
+                <div style={{fontSize:"11px",color:T.muted,marginTop:4}}>{info.days} days • {fmtDate(info.createdAt)}</div>
+              </Card>
+            ))}
+          </div>
+        )}
+        {!loading&&tab==="config"&&(
+          <div>
+            {[{key:"upiId",label:"UPI ID"},{key:"whatsapp",label:"WhatsApp Number"},{key:"amount",label:"Amount (₹)",type:"number"},{key:"trialDays",label:"Trial Days",type:"number"}].map(f=>(
+              <Input key={f.key} label={f.label} type={f.type||"text"} value={config[f.key]||""} onChange={v=>setConfig(p=>({...p,[f.key]:v}))}/>
+            ))}
+            <Btn onClick={saveConfig} style={{width:"100%"}}>Save Config</Btn>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminUserCard({u,onActivate}){
+  const [days,setDays]=useState("30");
+  return(
+    <Card>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+        <div>
+          <div style={{fontWeight:700}}>{u.name||u.email}</div>
+          <div style={{fontSize:"12px",color:T.muted}}>{u.email}</div>
+          <div style={{fontSize:"12px",color:T.muted}}>{u.goal} • {u.level}</div>
+          {u.sub?.expiresAt&&<div style={{fontSize:"11px",color:T.dim}}>Expires: {fmtDate(u.sub.expiresAt)}</div>}
+        </div>
+        <Badge label={u.sub?.status||"trial"} color={u.sub?.status==="active"?T.green:u.sub?.status==="trial"?T.amber:T.red}/>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <div style={{display:"flex",gap:6}}>
+          {[7,30,90,365].map(d=>(
+            <button key={d} onClick={()=>setDays(String(d))} style={{background:days===String(d)?T.purple:T.bg3,color:days===String(d)?"#fff":T.muted,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",fontSize:"11px",cursor:"pointer",fontFamily:T.font,fontWeight:700}}>{d}d</button>
+          ))}
+        </div>
+        <Btn small variant={u.sub?.status==="active"?"secondary":"green"} onClick={()=>onActivate(u.id,parseInt(days)||30)} style={{flex:1}}>
+          {u.sub?.status==="active"?"🔄 Extend":"⚡ Activate"}
+        </Btn>
+      </div>
+    </Card>
+  );
+}
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+function DashboardTab({profile,userData,sub}){
+  const [aiInsight,setAiInsight]=useState("");
+  const [loading,setLoading]=useState(false);
+  const todayNutrition=userData?.nutrition?.[today()]||{};
+  const totalCal=Object.values(todayNutrition).reduce((s,m)=>s+(m.macros?.calories||0),0);
+  const totalProt=Object.values(todayNutrition).reduce((s,m)=>s+(m.macros?.protein||0),0);
+  const todayWater=userData?.water?.[today()]||0;
+  const todaySleep=userData?.sleep?.[today()]||{};
+  const todaySteps=userData?.steps?.[today()]||0;
+  const totalSets=(userData?.workouts?.[today()]?.exercises||[]).reduce((s,e)=>s+(e.sets?.length||0),0);
+  const bmi=calcBMI(profile.weight,profile.height);
+  const [bmiLbl,bmiColor]=bmiLabel(bmi);
+  const trialDaysLeft=sub?.trialEnd?Math.max(0,Math.ceil((new Date(sub.trialEnd)-Date.now())/86400000)):0;
+
+  async function getInsight(){
+    setLoading(true);
+    const insight=await callAI([{role:"user",content:`Today: Cal=${totalCal}/${profile.calGoal}, Protein=${totalProt}g, Water=${todayWater}L, Steps=${todaySteps}, Sleep=${todaySleep.hours||0}h, Workout=${totalSets>0?"done":"not done"}. Give a tip.`}],
+      `You are FitPro AI coach. User: ${profile.name}, Goal: ${profile.goal}. Give short motivating tip in Hinglish (under 60 words). No markdown.`);
+    setAiInsight(insight);
+    setLoading(false);
+  }
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      {sub?.status==="trial"&&trialDaysLeft<=3&&(
+        <div style={{background:`${T.amber}22`,border:`1px solid ${T.amber}44`,borderRadius:T.r,padding:"10px 14px",marginBottom:14,fontSize:"13px",color:T.amber}}>
+          ⚠️ Trial {trialDaysLeft} din mein expire hoga! Subscribe karo.
+        </div>
+      )}
+      <div style={{display:"flex",gap:10,marginBottom:14}}>
+        <Card style={{flex:1,textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:900,color:bmiColor}}>{bmi}</div>
+          <div style={{fontSize:"11px",color:T.muted}}>BMI</div>
+          <Badge label={bmiLbl} color={bmiColor} style={{marginTop:4}}/>
+        </Card>
+        <Card style={{flex:1,textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:900,color:T.amber}}>🔥 {userData?.streak||0}</div>
+          <div style={{fontSize:"11px",color:T.muted}}>Day Streak</div>
+        </Card>
+      </div>
+      <Card style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+          <span style={{fontWeight:700}}>🔥 Calories</span>
+          <span style={{color:T.muted,fontSize:"13px"}}>{totalCal} / {profile.calGoal} kcal</span>
+        </div>
+        <ProgressBar value={totalCal} max={profile.calGoal} color={totalCal>profile.calGoal?T.red:T.grad} height={12}/>
+        <div style={{display:"flex",gap:12,marginTop:12}}>
+          {[{label:"Protein",val:totalProt,max:profile.protGoal,unit:"g",color:T.purple},{label:"Water",val:todayWater,max:profile.waterGoal||3,unit:"L",color:T.cyan},{label:"Sets",val:totalSets,max:20,unit:"",color:T.pink}].map(m=>(
+            <div key={m.label} style={{flex:1}}>
+              <div style={{fontSize:"11px",color:T.muted,marginBottom:4}}>{m.label}: <b style={{color:T.text}}>{m.val}{m.unit}</b></div>
+              <ProgressBar value={m.val} max={m.max} color={m.color}/>
+            </div>
+          ))}
+        </div>
+      </Card>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <Card><div style={{fontSize:"11px",color:T.muted,marginBottom:4}}>😴 Sleep</div><div style={{fontSize:20,fontWeight:800}}>{todaySleep.hours||"--"}h</div><div style={{fontSize:"11px",color:T.muted}}>{todaySleep.quality||"Not logged"}</div></Card>
+        <Card><div style={{fontSize:"11px",color:T.muted,marginBottom:4}}>👟 Steps</div><div style={{fontSize:20,fontWeight:800}}>{todaySteps.toLocaleString()}</div><ProgressBar value={todaySteps} max={10000} color={T.green} style={{marginTop:4}}/></Card>
+      </div>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <span style={{fontWeight:700}}>🤖 AI Insight</span>
+          <Btn small variant="ghost" onClick={getInsight} disabled={loading}>{loading?"...":"Refresh"}</Btn>
+        </div>
+        {aiInsight?<div style={{fontSize:"14px",color:T.text,lineHeight:1.7,background:`${T.purple}11`,borderRadius:T.r,padding:"12px"}}>{aiInsight}</div>
+          :<div style={{fontSize:"13px",color:T.dim}}>Tap Refresh for a personalized tip! 💡</div>}
+      </Card>
+    </div>
+  );
+}
+
+// ─── NUTRITION TAB ────────────────────────────────────────────────────────────
+function NutritionTab({profile,userData,saveData}){
+  const [mealType,setMealType]=useState("Lunch");
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [analysisResult,setAnalysisResult]=useState(null);
+  const [foodSearch,setFoodSearch]=useState("");
+  const [toast,setToast]=useState("");
+  const [mode,setMode]=useState("ai"); // "ai" or "db"
+  const showToast=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
+
+  const todayMeals=userData?.nutrition?.[today()]||{};
+  const totals=Object.values(todayMeals).reduce((acc,m)=>{
+    const mac=m.macros||{};
+    return{calories:acc.calories+(mac.calories||0),protein:acc.protein+(mac.protein||0),carbs:acc.carbs+(mac.carbs||0),fat:acc.fat+(mac.fat||0)};
+  },{calories:0,protein:0,carbs:0,fat:0});
+
+  async function analyzeAI(){
+    if(!input.trim()){showToast("❌ Kuch toh likho!");return;}
+    setLoading(true);setAnalysisResult(null);
+    const result=await callAI([{role:"user",content:`Meal: ${input}. Diet: ${profile.diet}. User is Indian.`}],
+      `Nutrition expert for Indian food. Return ONLY JSON: {"foods":["item"],"macros":{"calories":0,"protein":0,"carbs":0,"fat":0,"fiber":0},"summary":"brief in Hinglish"}. No markdown.`,true);
+    if(result) setAnalysisResult({...result,rawInput:input});
+    else showToast("❌ Analysis failed.");
+    setLoading(false);
+  }
+
+  function addFromDB(food){
+    const result={foods:[food.name],macros:{calories:food.cal,protein:food.p,carbs:food.c,fat:food.f,fiber:0},summary:`${food.name} added from Indian food database`};
+    setAnalysisResult(result);
+  }
+
+  async function logMeal(){
+    if(!analysisResult) return;
+    const meal={type:mealType,foods:analysisResult.foods,macros:analysisResult.macros,summary:analysisResult.summary,timestamp:new Date().toISOString()};
+    const updated={...userData,nutrition:{...(userData?.nutrition||{}),[today()]:{...todayMeals,[`${mealType}_${Date.now()}`]:meal}}};
+    await saveData(updated);
+    setInput("");setAnalysisResult(null);showToast("✅ Meal logged!");
+  }
+
+  const filteredFoods=INDIAN_FOODS.filter(f=>f.name.toLowerCase().includes(foodSearch.toLowerCase()));
+  const macroColors={calories:T.amber,protein:T.purple,carbs:T.cyan,fat:T.pink};
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:10}}>📊 Today's Macros</div>
+        {Object.entries({calories:profile.calGoal,protein:profile.protGoal,carbs:250,fat:70}).map(([k,goal])=>(
+          <div key={k} style={{marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:"13px",marginBottom:4}}>
+              <span style={{color:T.muted,textTransform:"capitalize"}}>{k}</span>
+              <span><b style={{color:macroColors[k]}}>{Math.round(totals[k]||0)}</b><span style={{color:T.dim}}> / {goal}{k==="calories"?" kcal":"g"}</span></span>
+            </div>
+            <ProgressBar value={totals[k]||0} max={goal} color={macroColors[k]}/>
+          </div>
+        ))}
+      </Card>
+
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:10}}>🍽️ Log Meal</div>
+        <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:12}}>
+          {["Breakfast","Lunch","Dinner","Snacks","Pre-Workout","Post-Workout"].map(m=><Chip key={m} label={m} active={mealType===m} onClick={()=>{setMealType(m);setAnalysisResult(null);}}/>)}
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <Chip label="🤖 AI Analysis" active={mode==="ai"} onClick={()=>setMode("ai")}/>
+          <Chip label="🍛 Indian Foods" active={mode==="db"} onClick={()=>setMode("db")}/>
+        </div>
+
+        {mode==="ai"&&!analysisResult&&(
+          <>
+            <textarea value={input} onChange={e=>setInput(e.target.value)} placeholder="e.g. 2 roti, dal makhani, chawal...&#10;Hindi ya English mein likhoh"
+              style={{width:"100%",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"12px",fontSize:"14px",fontFamily:T.font,outline:"none",minHeight:80,resize:"vertical",boxSizing:"border-box",lineHeight:1.6}}/>
+            <Btn onClick={analyzeAI} disabled={loading} style={{width:"100%",marginTop:10}}>
+              {loading?<span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><TypingDots/>Analyzing...</span>:"🤖 Analyze"}
+            </Btn>
+          </>
+        )}
+
+        {mode==="db"&&!analysisResult&&(
+          <>
+            <input value={foodSearch} onChange={e=>setFoodSearch(e.target.value)} placeholder="🔍 Dal, roti, paneer search karo..."
+              style={{width:"100%",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"10px 12px",fontSize:"14px",fontFamily:T.font,outline:"none",boxSizing:"border-box",marginBottom:10}}/>
+            <div style={{maxHeight:200,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
+              {filteredFoods.slice(0,20).map((f,i)=>(
+                <div key={i} onClick={()=>addFromDB(f)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.bg3,borderRadius:10,padding:"10px 12px",cursor:"pointer"}}>
+                  <div style={{fontSize:"13px",fontWeight:600}}>{f.name}</div>
+                  <div style={{fontSize:"12px",color:T.amber}}>{f.cal} kcal</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {analysisResult&&(
+          <div>
+            <div style={{background:`${T.purple}11`,border:`1px solid ${T.purple}33`,borderRadius:T.r,padding:"14px",marginBottom:12}}>
+              <div style={{fontSize:"12px",color:T.purple,fontWeight:700,marginBottom:8}}>✅ Analysis Result</div>
+              <div style={{fontSize:"13px",color:T.muted,marginBottom:10,lineHeight:1.6}}>{analysisResult.summary}</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
+                {analysisResult.foods?.map((f,i)=><span key={i} style={{background:T.bg3,border:`1px solid ${T.border}`,borderRadius:99,padding:"4px 10px",fontSize:"12px"}}>{f}</span>)}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                {[{label:"Calories",value:analysisResult.macros?.calories,unit:"kcal",color:T.amber},{label:"Protein",value:analysisResult.macros?.protein,unit:"g",color:T.purple},{label:"Carbs",value:analysisResult.macros?.carbs,unit:"g",color:T.cyan},{label:"Fat",value:analysisResult.macros?.fat,unit:"g",color:T.pink},{label:"Fiber",value:analysisResult.macros?.fiber,unit:"g",color:T.green}].map(m=>(
+                  <div key={m.label} style={{background:T.bg3,borderRadius:10,padding:"8px",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:800,color:m.color}}>{m.value||0}</div>
+                    <div style={{fontSize:"10px",color:T.dim}}>{m.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <Btn variant="ghost" onClick={()=>setAnalysisResult(null)} style={{flex:1}}>✕ Discard</Btn>
+              <Btn onClick={logMeal} style={{flex:2}} variant="green">✅ Log Meal</Btn>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {Object.entries(todayMeals).length>0&&(
+        <div>
+          <div style={{fontWeight:700,marginBottom:10}}>Today's Meals</div>
+          {Object.entries(todayMeals).map(([k,m])=>(
+            <Card key={k} style={{marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontWeight:700,fontSize:"13px"}}>{m.type}</span>
+                <span style={{fontSize:"12px",color:T.amber}}>{m.macros?.calories||0} kcal</span>
+              </div>
+              <div style={{fontSize:"12px",color:T.muted,marginBottom:6}}>{m.foods?.join(", ")}</div>
+              <div style={{display:"flex",gap:10,fontSize:"11px",color:T.dim}}>
+                <span>P: {m.macros?.protein||0}g</span><span>C: {m.macros?.carbs||0}g</span><span>F: {m.macros?.fat||0}g</span>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── WORKOUT TAB ──────────────────────────────────────────────────────────────
+function WorkoutTab({profile,userData,saveData}){
+  const [view,setView]=useState("calendar");
+  const [session,setSession]=useState(null);
+  const [bodyPart,setBodyPart]=useState("Chest");
+  const [search,setSearch]=useState("");
+  const [restTimer,setRestTimer]=useState(null);
+  const [restLeft,setRestLeft]=useState(0);
+  const [postModal,setPostModal]=useState(false);
+  const [rating,setRating]=useState(4);
+  const [pump,setPump]=useState("Great");
+  const [aiAnalysis,setAiAnalysis]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+  const [toast,setToast]=useState("");
+  const showToast=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
+
+  const workouts=userData?.workouts||{};
+
+  useEffect(()=>{
+    if(!restTimer) return;
+    setRestLeft(restTimer);
+    const id=setInterval(()=>setRestLeft(p=>{if(p<=1){clearInterval(id);setRestTimer(null);return 0;}return p-1;}),1000);
+    return()=>clearInterval(id);
+  },[restTimer]);
+
+  function startSession(date=today()){
+    const existing=workouts[date];
+    setSession(existing?{...existing,date}:{date,exercises:[],mood:"Motivated"});
+    setView("session");
+  }
+
+  function addExercise(name){
+    if(session?.exercises?.some(e=>e.name===name)){showToast("Already added!");return;}
+    setSession(p=>({...p,exercises:[...(p.exercises||[]),{name,sets:[],id:uid()}]}));
+  }
+  function removeExercise(id){setSession(p=>({...p,exercises:p.exercises.filter(e=>e.id!==id)}));}
+  function addSet(exId){setSession(p=>({...p,exercises:p.exercises.map(e=>e.id===exId?{...e,sets:[...e.sets,{reps:10,weight:20,done:false}]}:e)}));}
+  function updateSet(exId,si,field,val){setSession(p=>({...p,exercises:p.exercises.map(e=>e.id===exId?{...e,sets:e.sets.map((s,i)=>i===si?{...s,[field]:field==="done"?val:+val}:s)}:e)}));}
+  function removeSet(exId,si){setSession(p=>({...p,exercises:p.exercises.map(e=>e.id===exId?{...e,sets:e.sets.filter((_,i)=>i!==si)}:e)}));}
+  function calc1RM(sets){return sets.reduce((b,s)=>{const rm=s.weight*(1+s.reps/30);return rm>b?rm:b;},0).toFixed(1);}
+
+  async function saveSession(){
+    if(!session?.exercises?.length){showToast("❌ Koi exercise nahi ki!");return;}
+    const saved={...session,savedAt:new Date().toISOString(),rating,pump};
+    const updated={...userData,workouts:{...(userData?.workouts||{}),[session.date]:saved}};
+    await saveData(updated);
+    setPostModal(false);
+    setAiLoading(true);
+    const summary=session.exercises.map(e=>`${e.name}: ${e.sets.length} sets`).join(", ");
+    const analysis=await callAI([{role:"user",content:`Workout: ${summary}. Goal: ${profile.goal}. Rating: ${rating}/5.`}],
+      `FitPro AI coach. Give honest workout feedback in Hinglish. Max 80 words. No markdown.`);
+    setAiAnalysis(analysis);
+    setAiLoading(false);
+    setView("analysis");
+  }
+
+  const now=new Date();
+  const year=now.getFullYear(),month=now.getMonth();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const firstDay=new Date(year,month,1).getDay();
+
+  if(view==="analysis") return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      <Btn variant="ghost" onClick={()=>setView("calendar")} small style={{marginBottom:16}}>← Back</Btn>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:800,fontSize:16,marginBottom:10}}>🏋️ Workout Saved!</div>
+        {aiLoading?<div style={{display:"flex",gap:8,alignItems:"center",color:T.muted,fontSize:"13px"}}><TypingDots/> AI analysis...</div>
+          :aiAnalysis?<div style={{background:`${T.purple}11`,borderRadius:T.r,padding:12,fontSize:"14px",lineHeight:1.7}}>{aiAnalysis}</div>:null}
+      </Card>
+      {session?.exercises?.map(e=>(
+        <Card key={e.id} style={{marginBottom:10}}>
+          <div style={{fontWeight:700,marginBottom:6}}>{e.name}</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {e.sets.map((s,i)=><div key={i} style={{background:T.bg3,borderRadius:8,padding:"6px 10px",fontSize:"12px"}}>Set {i+1}: {s.reps}×{s.weight}kg</div>)}
+          </div>
+          {e.sets.length>0&&<div style={{fontSize:"12px",color:T.purple,marginTop:6}}>1RM: ~{calc1RM(e.sets)} kg</div>}
+        </Card>
+      ))}
+      <Btn onClick={()=>setView("calendar")} style={{width:"100%"}}>Done ✓</Btn>
+    </div>
+  );
+
+  if(view==="session") return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      {postModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+          <Card style={{width:"100%",maxWidth:360}}>
+            <div style={{fontSize:18,fontWeight:800,marginBottom:16}}>🎉 Workout Complete!</div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:"13px",color:T.muted,marginBottom:8}}>Rating</div>
+              <div style={{display:"flex",gap:8}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>setRating(n)} style={{fontSize:24,background:"none",border:"none",cursor:"pointer",opacity:n<=rating?1:0.3}}>⭐</button>)}</div>
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:"13px",color:T.muted,marginBottom:8}}>Pump Feel</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["Amazing","Great","Good","Meh","Tired"].map(p=><Chip key={p} label={p} active={pump===p} onClick={()=>setPump(p)}/>)}</div>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <Btn variant="ghost" onClick={()=>setPostModal(false)} style={{flex:1}}>Cancel</Btn>
+              <Btn onClick={saveSession} style={{flex:2}}>Save & Analyze 🤖</Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+      {restTimer&&(
+        <div style={{background:`${T.purple}22`,border:`1px solid ${T.purple}44`,borderRadius:T.r,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontWeight:700,color:T.purple}}>⏱ Rest</span>
+          <span style={{fontSize:24,fontWeight:900,color:restLeft<=10?T.red:T.text}}>{restLeft}s</span>
+          <Btn small variant="ghost" onClick={()=>{setRestTimer(null);setRestLeft(0);}}>Stop</Btn>
+        </div>
+      )}
+      <div style={{display:"flex",gap:10,marginBottom:14}}>
+        <Btn variant="ghost" onClick={()=>setView("calendar")} small>←</Btn>
+        <Btn onClick={()=>setPostModal(true)} style={{flex:1}} small>🏁 Finish</Btn>
+      </div>
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:"12px",color:T.muted,marginBottom:8}}>⏱ Rest Timer</div>
+        <div style={{display:"flex",gap:8}}>{[60,90,120,180].map(t=><Btn key={t} small variant="secondary" onClick={()=>setRestTimer(t)}>{t}s</Btn>)}</div>
+      </div>
+      {session?.exercises?.map(ex=>(
+        <Card key={ex.id} style={{marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+            <div style={{fontWeight:700}}>{ex.name}</div>
+            <button onClick={()=>removeExercise(ex.id)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:16}}>✕</button>
+          </div>
+          {ex.sets.map((s,i)=>(
+            <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,background:s.done?`${T.green}11`:T.bg3,borderRadius:10,padding:"8px 10px"}}>
+              <span style={{fontSize:"12px",color:T.muted,minWidth:32}}>Set {i+1}</span>
+              <input type="number" value={s.reps} onChange={e=>updateSet(ex.id,i,"reps",e.target.value)} style={{width:48,background:"transparent",border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"4px 6px",textAlign:"center",fontFamily:T.font,fontSize:"13px"}}/>
+              <span style={{fontSize:"11px",color:T.dim}}>reps</span>
+              <input type="number" value={s.weight} onChange={e=>updateSet(ex.id,i,"weight",e.target.value)} style={{width:52,background:"transparent",border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"4px 6px",textAlign:"center",fontFamily:T.font,fontSize:"13px"}}/>
+              <span style={{fontSize:"11px",color:T.dim}}>kg</span>
+              <button onClick={()=>updateSet(ex.id,i,"done",!s.done)} style={{fontSize:18,background:"none",border:"none",cursor:"pointer"}}>{s.done?"✅":"⭕"}</button>
+              <button onClick={()=>removeSet(ex.id,i)} style={{background:"none",border:"none",color:T.dim,cursor:"pointer"}}>✕</button>
+            </div>
+          ))}
+          {ex.sets.length>0&&<div style={{fontSize:"11px",color:T.purple,marginBottom:8}}>1RM: ~{calc1RM(ex.sets)} kg</div>}
+          <Btn small variant="ghost" onClick={()=>addSet(ex.id)}>+ Set</Btn>
+        </Card>
+      ))}
+      <Card style={{marginTop:14}}>
+        <div style={{fontWeight:700,marginBottom:10}}>+ Add Exercise</div>
+        <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:8,marginBottom:10}}>
+          {BODY_PARTS.map(bp=><Chip key={bp} label={bp} active={bodyPart===bp} onClick={()=>setBodyPart(bp)}/>)}
+        </div>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search..."
+          style={{width:"100%",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"10px 12px",fontFamily:T.font,fontSize:"14px",outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {EXERCISES[bodyPart]?.filter(e=>e.toLowerCase().includes(search.toLowerCase())).map(e=>(
+            <Chip key={e} label={e} active={session?.exercises?.some(ex=>ex.name===e)} onClick={()=>addExercise(e)}/>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      <Card style={{marginBottom:16}}>
+        <div style={{fontWeight:800,marginBottom:14,textAlign:"center"}}>{now.toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,textAlign:"center",marginBottom:8}}>
+          {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d=><div key={d} style={{fontSize:"11px",color:T.dim,fontWeight:700}}>{d}</div>)}
+          {Array(firstDay).fill(null).map((_,i)=><div key={i}/>)}
+          {Array(daysInMonth).fill(null).map((_,i)=>{
+            const d=i+1;
+            const dateStr=`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+            const hasW=workouts[dateStr];
+            const isToday=dateStr===today();
+            return(
+              <div key={d} onClick={()=>startSession(dateStr)} style={{padding:"6px 2px",borderRadius:8,cursor:"pointer",background:isToday?`${T.purple}33`:"transparent",border:isToday?`1px solid ${T.purple}`:"1px solid transparent"}}>
+                <div style={{fontSize:"13px",fontWeight:isToday?800:400,color:isToday?T.purple:T.text}}>{d}</div>
+                {hasW&&<div style={{width:5,height:5,borderRadius:"50%",background:T.purple,margin:"2px auto 0"}}/>}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      <Btn onClick={()=>startSession(today())} style={{width:"100%",marginBottom:14}}>
+        {workouts[today()]?"✏️ Edit Today's Workout":"🏋️ Start Workout"}
+      </Btn>
+      <div style={{fontWeight:700,marginBottom:10}}>Recent Workouts</div>
+      {Object.entries(workouts).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5).map(([d,w])=>(
+        <Card key={d} onClick={()=>{setSession({...w,date:d});setView("session");}} style={{marginBottom:8,cursor:"pointer"}}>
+          <div style={{display:"flex",justifyContent:"space-between"}}>
+            <div><div style={{fontWeight:700,fontSize:"14px"}}>{fmtDate(d)}</div><div style={{fontSize:"12px",color:T.muted}}>{w.exercises?.length||0} exercises</div></div>
+            <Badge label={`${w.rating||"?"}⭐`} color={T.amber}/>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ─── SLEEP TAB ────────────────────────────────────────────────────────────────
+function SleepTab({profile,userData,saveData}){
+  const [bedtime,setBedtime]=useState("23:00");
+  const [waketime,setWaketime]=useState("06:30");
+  const [quality,setQuality]=useState("Good");
+  const [toast,setToast]=useState("");
+  const showToast=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
+
+  function calcHours(bed,wake){
+    const [bh,bm]=bed.split(":").map(Number);
+    const [wh,wm]=wake.split(":").map(Number);
+    let mins=(wh*60+wm)-(bh*60+bm);
+    if(mins<0) mins+=1440;
+    return +(mins/60).toFixed(1);
+  }
+
+  async function logSleep(){
+    const hours=calcHours(bedtime,waketime);
+    const updated={...userData,sleep:{...(userData?.sleep||{}),[today()]:{bedtime,waketime,hours,quality}}};
+    await saveData(updated);
+    showToast("✅ Sleep logged!");
+  }
+
+  const sleep=userData?.sleep||{};
+  const last7=Array.from({length:7},(_,i)=>{
+    const d=new Date();d.setDate(d.getDate()-(6-i));
+    const key=d.toISOString().split("T")[0];
+    return{label:d.toLocaleDateString("en-IN",{weekday:"short"}),value:sleep[key]?.hours||0};
+  });
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:14}}>😴 Log Sleep</div>
+        <Input label="Bedtime" value={bedtime} onChange={setBedtime} type="time"/>
+        <Input label="Wake Time" value={waketime} onChange={setWaketime} type="time"/>
+        <div style={{background:`${T.purple}11`,borderRadius:T.r,padding:12,marginBottom:14,textAlign:"center"}}>
+          <div style={{fontSize:32,fontWeight:900,color:T.purple}}>{calcHours(bedtime,waketime)}h</div>
+          <div style={{fontSize:"12px",color:T.muted}}>Sleep duration</div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:"12px",color:T.muted,marginBottom:8,fontWeight:600,textTransform:"uppercase"}}>Quality</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {["Excellent","Good","Fair","Poor"].map(q=><Chip key={q} label={q} active={quality===q} onClick={()=>setQuality(q)}/>)}
+          </div>
+        </div>
+        <Btn onClick={logSleep} style={{width:"100%"}}>💤 Log Sleep</Btn>
+      </Card>
+      <Card>
+        <div style={{fontWeight:700,marginBottom:14}}>Last 7 Days</div>
+        <BarChart data={last7} color={T.cyan}/>
+      </Card>
+    </div>
+  );
+}
+
+// ─── WATER TAB ────────────────────────────────────────────────────────────────
+function WaterTab({profile,userData,saveData}){
+  const todayWater=userData?.water?.[today()]||0;
+  const goal=profile.waterGoal||3;
+
+  async function add(amt){
+    const updated={...userData,water:{...(userData?.water||{}),[today()]:+((todayWater+amt).toFixed(2))}};
+    await saveData(updated);
+  }
+  async function reset(){
+    const updated={...userData,water:{...(userData?.water||{}),[today()]:0}};
+    await saveData(updated);
+  }
+
+  const glasses=Math.round(todayWater/0.25);
+  const totalGlasses=Math.round(goal/0.25);
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Card style={{marginBottom:14,textAlign:"center"}}>
+        <div style={{fontSize:"12px",color:T.muted,marginBottom:8}}>TODAY'S WATER</div>
+        <div style={{fontSize:52,fontWeight:900,background:"linear-gradient(135deg,#06b6d4,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:4}}>{todayWater.toFixed(1)}L</div>
+        <div style={{color:T.muted,fontSize:"14px",marginBottom:16}}>Goal: {goal}L</div>
+        <ProgressBar value={todayWater} max={goal} color={T.cyan} height={16} style={{marginBottom:16}}/>
+        <div style={{display:"flex",flexWrap:"wrap",justifyContent:"center",gap:6}}>
+          {Array.from({length:Math.min(totalGlasses,16)},(_,i)=><span key={i} style={{fontSize:22,opacity:i<glasses?1:0.2}}>🥤</span>)}
+        </div>
+      </Card>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:12}}>Quick Add</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {[{label:"+100ml",amt:0.1},{label:"+250ml",amt:0.25},{label:"+500ml",amt:0.5},{label:"+1L",amt:1}].map(b=>(
+            <Btn key={b.label} variant="secondary" onClick={()=>add(b.amt)}>{b.label} 💧</Btn>
+          ))}
+        </div>
+      </Card>
+      <div style={{display:"flex",gap:10}}>
+        <Card style={{flex:1,textAlign:"center"}}><div style={{fontSize:22,fontWeight:900,color:T.cyan}}>{glasses}</div><div style={{fontSize:"11px",color:T.muted}}>Glasses</div></Card>
+        <Card style={{flex:1,textAlign:"center"}}><div style={{fontSize:22,fontWeight:900}}>{Math.max(0,goal-todayWater).toFixed(1)}L</div><div style={{fontSize:"11px",color:T.muted}}>Remaining</div></Card>
+        <Btn variant="ghost" onClick={reset} style={{flex:1}}>🔄 Reset</Btn>
+      </div>
+      {todayWater>=goal&&<Card style={{marginTop:14,background:`${T.green}11`,border:`1px solid ${T.green}33`,textAlign:"center"}}><div style={{fontSize:28,marginBottom:6}}>🎉</div><div style={{color:T.green,fontWeight:700}}>Hydration goal complete!</div></Card>}
+    </div>
+  );
+}
+
+// ─── STEPS TAB ────────────────────────────────────────────────────────────────
+function StepsTab({userData,saveData}){
+  const [custom,setCustom]=useState("");
+  const [toast,setToast]=useState("");
+  const showToast=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
+  const todaySteps=userData?.steps?.[today()]||0;
+
+  async function add(n){
+    const updated={...userData,steps:{...(userData?.steps||{}),[today()]:(todaySteps+n)}};
+    await saveData(updated);
+  }
+  async function setManual(){
+    const n=parseInt(custom);
+    if(!isNaN(n)&&n>=0){
+      const updated={...userData,steps:{...(userData?.steps||{}),[today()]:n}};
+      await saveData(updated);
+      setCustom("");showToast("✅ Steps updated!");
+    }
+  }
+
+  const last7=Array.from({length:7},(_,i)=>{
+    const d=new Date();d.setDate(d.getDate()-(6-i));
+    const key=d.toISOString().split("T")[0];
+    return{label:d.toLocaleDateString("en-IN",{weekday:"short"}),value:userData?.steps?.[key]||0};
+  });
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      <Card style={{marginBottom:14,textAlign:"center"}}>
+        <div style={{fontSize:52,fontWeight:900,background:T.gradGreen,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>{todaySteps.toLocaleString()}</div>
+        <div style={{color:T.muted,marginBottom:14}}>steps • goal: 10,000</div>
+        <ProgressBar value={todaySteps} max={10000} color={T.green} height={14} style={{marginBottom:16}}/>
+        <div style={{display:"flex",justifyContent:"center",gap:24}}>
+          <div><div style={{fontSize:20,fontWeight:800,color:T.amber}}>{Math.round(todaySteps*0.04)}</div><div style={{fontSize:"11px",color:T.muted}}>kcal</div></div>
+          <div><div style={{fontSize:20,fontWeight:800,color:T.cyan}}>{(todaySteps*0.0008).toFixed(2)}km</div><div style={{fontSize:"11px",color:T.muted}}>distance</div></div>
+        </div>
+      </Card>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:12}}>Quick Add</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {[{label:"+1k",n:1000},{label:"+2.5k",n:2500},{label:"+5k",n:5000},{label:"+7.5k",n:7500}].map(b=>(
+            <Btn key={b.label} variant="secondary" onClick={()=>add(b.n)}>{b.label} 👟</Btn>
+          ))}
+        </div>
+      </Card>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:10}}>Set Manually</div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={custom} onChange={e=>setCustom(e.target.value)} type="number" placeholder="Enter steps..."
+            style={{flex:1,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"10px 12px",fontFamily:T.font,fontSize:"14px",outline:"none"}}/>
+          <Btn onClick={setManual} small>Set</Btn>
+        </div>
+      </Card>
+      <Card><div style={{fontWeight:700,marginBottom:14}}>Last 7 Days</div><BarChart data={last7} color={T.green}/></Card>
+    </div>
+  );
+}
+
+// ─── AI COACH ─────────────────────────────────────────────────────────────────
+function AICoachTab({profile,userData}){
+  const [messages,setMessages]=useState([{role:"assistant",content:`Namaste ${profile.name}! 🙏 Main hun aapka FitPro AI coach. Hindi, English, ya Hinglish mein poochho! 💪`}]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const bottomRef=useRef();
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages,loading]);
+
+  const todayNutrition=userData?.nutrition?.[today()]||{};
+  const totalCal=Object.values(todayNutrition).reduce((s,m)=>s+(m.macros?.calories||0),0);
+
+  const systemPrompt=`You are FitPro AI coach for Indian users. User: ${profile.name}, Age: ${profile.age}, Weight: ${profile.weight}kg, Goal: ${profile.goal}, Diet: ${profile.diet}, BMI: ${calcBMI(profile.weight,profile.height)}. Today: Calories=${totalCal}/${profile.calGoal}, Water=${userData?.water?.[today()]||0}L, Steps=${userData?.steps?.[today()]||0}. Reply in Hinglish or English (match user's language). Under 80 words. Friendly, honest. No markdown. Add emojis.`;
+
+  async function sendMessage(){
+    if(!input.trim()||loading) return;
+    const userMsg={role:"user",content:input};
+    setMessages(p=>[...p,userMsg]);
+    setInput("");setLoading(true);
+    const history=messages.slice(-10).concat([userMsg]).map(m=>({role:m.role,content:m.content}));
+    const reply=await callAI(history,systemPrompt);
+    setMessages(p=>[...p,{role:"assistant",content:reply}]);
+    setLoading(false);
+  }
+
+  const quickQs=["Aaj ka workout kaisa raha?","Mujhe Indian diet plan do","Protein kaise badhau?","Weight loss tips do","BMI theek hai kya?"];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 130px)"}}>
+      <div style={{flex:1,overflowY:"auto",padding:"0 16px 8px"}}>
+        {messages.map((m,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:12}}>
+            {m.role==="assistant"&&<div style={{width:32,height:32,borderRadius:"50%",background:T.grad,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,marginRight:8,flexShrink:0}}>🤖</div>}
+            <div style={{maxWidth:"80%",background:m.role==="user"?T.grad:T.card,color:T.text,borderRadius:m.role==="user"?"18px 18px 4px 18px":"18px 18px 18px 4px",padding:"10px 14px",fontSize:"14px",lineHeight:1.7,border:m.role==="user"?"none":`1px solid ${T.border}`}}>{m.content}</div>
+          </div>
+        ))}
+        {loading&&<div style={{display:"flex",marginBottom:12}}><div style={{width:32,height:32,borderRadius:"50%",background:T.grad,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,marginRight:8}}>🤖</div><div style={{background:T.card,borderRadius:"18px 18px 18px 4px",padding:"12px 16px",border:`1px solid ${T.border}`}}><TypingDots/></div></div>}
+        <div ref={bottomRef}/>
+      </div>
+      <div style={{padding:"8px 16px",borderTop:`1px solid ${T.border}`}}>
+        <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:8,marginBottom:8}}>
+          {quickQs.map(q=><button key={q} onClick={()=>setInput(q)} style={{background:T.bg3,border:`1px solid ${T.border}`,color:T.muted,borderRadius:99,padding:"6px 12px",fontSize:"12px",cursor:"pointer",whiteSpace:"nowrap",fontFamily:T.font}}>{q}</button>)}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMessage()} placeholder="Hindi, English, Hinglish mein..."
+            style={{flex:1,background:T.bg3,border:`1px solid ${T.border}`,borderRadius:T.r,color:T.text,padding:"12px 14px",fontSize:"14px",fontFamily:T.font,outline:"none"}}/>
+          <Btn onClick={sendMessage} disabled={loading||!input.trim()} style={{width:48,padding:0,fontSize:20}}>➤</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PROGRESS TAB ─────────────────────────────────────────────────────────────
+function ProgressTab({profile,userData}){
+  const [chartType,setChartType]=useState("calories");
+  const last14=Array.from({length:14},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(13-i));return d.toISOString().split("T")[0];});
+  const nutrition=userData?.nutrition||{};
+  const sleep=userData?.sleep||{};
+  const water=userData?.water||{};
+  const steps=userData?.steps||{};
+  const workouts=userData?.workouts||{};
+
+  const chartData={
+    calories:last14.map(d=>({label:fmtDate(d).split(" ")[0],value:Object.values(nutrition[d]||{}).reduce((s,m)=>s+(m.macros?.calories||0),0)})),
+    protein:last14.map(d=>({label:fmtDate(d).split(" ")[0],value:Object.values(nutrition[d]||{}).reduce((s,m)=>s+(m.macros?.protein||0),0)})),
+    sleep:last14.map(d=>({label:fmtDate(d).split(" ")[0],value:sleep[d]?.hours||0})),
+    water:last14.map(d=>({label:fmtDate(d).split(" ")[0],value:water[d]||0})),
+    steps:last14.map(d=>({label:fmtDate(d).split(" ")[0],value:steps[d]||0})),
+    sets:last14.map(d=>({label:fmtDate(d).split(" ")[0],value:(workouts[d]?.exercises||[]).reduce((s,e)=>s+e.sets.length,0)})),
+  };
+  const goals={calories:profile.calGoal,protein:profile.protGoal,sleep:profile.sleepGoal||7,water:profile.waterGoal||3,steps:10000,sets:15};
+  const colors={calories:T.amber,protein:T.purple,sleep:T.cyan,water:T.cyan,steps:T.green,sets:T.pink};
+  const activeDays=last14.filter(d=>(workouts[d]?.exercises||[]).length>0).length;
+  const avgCal=Math.round(chartData.calories.filter(d=>d.value>0).reduce((s,d)=>s+d.value,0)/(chartData.calories.filter(d=>d.value>0).length||1));
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+        <Card style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:900,color:T.purple}}>{activeDays}</div><div style={{fontSize:"11px",color:T.muted}}>Active Days</div></Card>
+        <Card style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:900,color:T.amber}}>{avgCal}</div><div style={{fontSize:"11px",color:T.muted}}>Avg Cal</div></Card>
+        <Card style={{textAlign:"center"}}><div style={{fontSize:22,fontWeight:900,color:T.green}}>{userData?.streak||0}</div><div style={{fontSize:"11px",color:T.muted}}>Streak</div></Card>
+      </div>
+      <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:14,paddingBottom:4}}>
+        {[{id:"calories",label:"🔥 Cal"},{id:"protein",label:"💪 Prot"},{id:"sleep",label:"😴 Sleep"},{id:"water",label:"💧 Water"},{id:"steps",label:"👟 Steps"},{id:"sets",label:"🏋️ Sets"}].map(t=><Chip key={t.id} label={t.label} active={chartType===t.id} onClick={()=>setChartType(t.id)}/>)}
+      </div>
+      <Card>
+        <div style={{fontWeight:700,marginBottom:4}}>14-Day Trend</div>
+        <div style={{fontSize:"12px",color:T.muted,marginBottom:14}}>Yellow dashed = goal</div>
+        <LineChart data={chartData[chartType]} goal={goals[chartType]} color={colors[chartType]}/>
+      </Card>
+    </div>
+  );
+}
+
+// ─── SETTINGS TAB ─────────────────────────────────────────────────────────────
+function SettingsTab({profile,userData,saveData,sub,user}){
+  const [form,setForm]=useState({...profile});
+  const [toast,setToast]=useState("");
+  const showToast=m=>{setToast(m);setTimeout(()=>setToast(""),2500);};
+
+  async function save(){
+    const updated={...form,weight:+form.weight,height:+form.height,age:+form.age,calGoal:+form.calGoal||calcCalGoal(+form.weight,+form.height,+form.age,form.gender,form.activity,form.goal),protGoal:+form.protGoal||calcProtein(+form.weight,form.goal),waterGoal:+form.waterGoal||3};
+    await db.collection("users").doc(user.uid).set(updated,{merge:true});
+    showToast("✅ Saved!");
+  }
+
+  async function logout(){
+    await auth.signOut();
+    window.location.reload();
+  }
+
+  const statusColor=sub?.status==="active"?T.green:sub?.status==="trial"?T.amber:T.red;
+  const statusLabel=sub?.status==="active"?"Active":sub?.status==="trial"?`Trial (${Math.max(0,Math.ceil((new Date(sub.trialEnd)-Date.now())/86400000))}d left)`:"Expired";
+
+  return(
+    <div style={{padding:"0 16px 100px"}}>
+      <Toast msg={toast}/>
+      <Card style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+          <div style={{fontWeight:700}}>Subscription</div>
+          <Badge label={statusLabel} color={statusColor}/>
+        </div>
+        <div style={{fontSize:"12px",color:T.muted}}>{user.email}</div>
+      </Card>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:14}}>👤 Profile</div>
+        <Input label="Name" value={form.name||""} onChange={v=>setForm(p=>({...p,name:v}))}/>
+        <Input label="Age" value={form.age||""} onChange={v=>setForm(p=>({...p,age:v}))} type="number"/>
+        <Input label="Height (cm)" value={form.height||""} onChange={v=>setForm(p=>({...p,height:v}))} type="number"/>
+        <Input label="Weight (kg)" value={form.weight||""} onChange={v=>setForm(p=>({...p,weight:v}))} type="number"/>
+        <Select label="Gender" value={form.gender||"Male"} onChange={v=>setForm(p=>({...p,gender:v}))} options={["Male","Female","Other"]}/>
+      </Card>
+      <Card style={{marginBottom:14}}>
+        <div style={{fontWeight:700,marginBottom:14}}>🎯 Goals</div>
+        <Select label="Fitness Goal" value={form.goal||"Maintain"} onChange={v=>setForm(p=>({...p,goal:v}))} options={["Fat Loss","Muscle Gain","Strength","Cutting","Bulking","Maintain"]}/>
+        <Input label="Calorie Goal" value={form.calGoal||""} onChange={v=>setForm(p=>({...p,calGoal:v}))} type="number"/>
+        <Input label="Protein Goal (g)" value={form.protGoal||""} onChange={v=>setForm(p=>({...p,protGoal:v}))} type="number"/>
+        <Input label="Water Goal (L)" value={form.waterGoal||""} onChange={v=>setForm(p=>({...p,waterGoal:v}))} type="number" step="0.5"/>
+      </Card>
+      <Btn onClick={save} style={{width:"100%",marginBottom:12}}>💾 Save Changes</Btn>
+      <Btn variant="danger" onClick={logout} style={{width:"100%"}}>🚪 Logout</Btn>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+function FitPro(){
+  const [user,setUser]=useState(null);
+  const [authLoading,setAuthLoading]=useState(true);
+  const [userData,setUserData]=useState(null);
+  const [dataLoading,setDataLoading]=useState(true);
+  const [activeTab,setActiveTab]=useState("home");
+  const [showAdmin,setShowAdmin]=useState(false);
+  const [logoTaps,setLogoTaps]=useState(0);
+  const [toast,setToast]=useState({msg:"",type:"info"});
+  const tapTimer=useRef();
+  const showToast=(msg,type="info")=>{setToast({msg,type});setTimeout(()=>setToast({msg:"",type:"info"}),2500);};
+
+  useEffect(()=>{
+    const unsub=auth.onAuthStateChanged(u=>{setUser(u);setAuthLoading(false);});
+    return()=>unsub();
+  },[]);
+
+  useEffect(()=>{
+    if(!user){setDataLoading(false);return;}
+    const unsub=db.collection("users").doc(user.uid).onSnapshot(snap=>{
+      if(snap.exists) setUserData(snap.data());
+      setDataLoading(false);
+    });
+    return()=>unsub();
+  },[user]);
+
+  async function saveData(updated){
+    if(!user) return;
+    await db.collection("users").doc(user.uid).set(updated,{merge:true});
+  }
+
+  function handleLogoTap(){
+    clearTimeout(tapTimer.current);
+    setLogoTaps(p=>{
+      const next=p+1;
+      if(next>=5){
+        if(userData?.isAdmin||user?.email===ADMIN_EMAIL){setShowAdmin(true);}
+        else{showToast("❌ Admin access nahi hai!","error");}
+        return 0;
+      }
+      tapTimer.current=setTimeout(()=>setLogoTaps(0),2000);
+      return next;
+    });
+  }
+
+  if(authLoading||dataLoading) return(
+    <div style={{minHeight:"100vh",background:T.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:T.font}}>
+      <div style={{fontSize:48,marginBottom:16}}>💪</div>
+      <Spinner/>
+      <div style={{color:T.muted,marginTop:12,fontSize:"14px"}}>Loading FitPro AI...</div>
+    </div>
+  );
+
+  if(!user) return <AuthScreen onAuth={u=>{setUser(u);}}/>;
+  if(!userData?.setupDone) return <Onboarding user={user} onDone={p=>setUserData(p)}/>;
+
+  const profile=userData;
+  const sub=userData?.sub||{};
+  const isActive=sub.status==="active"||(sub.status==="trial"&&new Date(sub.trialEnd)>Date.now());
+  if(!isActive) return <Paywall user={user} profile={profile} onActivate={()=>window.location.reload()}/>;
+
+  const subStatus=sub.status==="active"?"Active":`Trial (${Math.max(0,Math.ceil((new Date(sub.trialEnd)-Date.now())/86400000))}d)`;
+  const subColor=sub.status==="active"?T.green:T.amber;
+
+  const TABS=[{id:"home",icon:"🏠",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"nutrition",icon:"🍽️",label:"Food"},{id:"ai",icon:"🤖",label:"AI Coach"},{id:"more",icon:"⋯",label:"More"}];
+  const MORE_TABS=[{id:"sleep",icon:"😴",label:"Sleep"},{id:"water",icon:"💧",label:"Water"},{id:"steps",icon:"👟",label:"Steps"},{id:"progress",icon:"📈",label:"Progress"},{id:"settings",icon:"⚙️",label:"Settings"}];
+  const isMoreTab=MORE_TABS.some(t=>t.id===activeTab);
+
+  return(
+    <div style={{background:T.bg,minHeight:"100vh",fontFamily:T.font,color:T.text,maxWidth:480,margin:"0 auto",position:"relative"}}>
+      <Toast msg={toast.msg} type={toast.type}/>
+      {showAdmin&&<AdminPanel onClose={()=>setShowAdmin(false)}/>}
+
+      {/* WhatsApp Floating Button */}
+      <a href={`https://wa.me/${WHATSAPP}?text=Hi! I need help with FitPro AI. Name: ${profile.name}`} target="_blank"
+        style={{position:"fixed",bottom:90,right:16,zIndex:300,width:52,height:52,borderRadius:"50%",background:"#25D366",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,textDecoration:"none",boxShadow:"0 4px 16px rgba(37,211,102,0.4)"}}>
+        💬
+      </a>
+
+      {/* Header */}
+      <div style={{position:"sticky",top:0,zIndex:100,background:`${T.bg}ee`,backdropFilter:"blur(12px)",borderBottom:`1px solid ${T.border}`,padding:"52px 20px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}} onClick={handleLogoTap}>
+          <div style={{width:36,height:36,borderRadius:10,background:T.grad,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,cursor:"pointer"}}>💪</div>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,lineHeight:1}}>FitPro AI</div>
+            <div style={{fontSize:"11px",color:T.muted}}>Hey {profile.name}! 👋</div>
+          </div>
+        </div>
+        <Badge label={subStatus} color={subColor}/>
+      </div>
+
+      {/* Tab Content */}
+      <div style={{paddingTop:8,minHeight:"calc(100vh - 130px)"}}>
+        {activeTab==="home"&&<DashboardTab profile={profile} userData={userData} sub={sub}/>}
+        {activeTab==="workout"&&<WorkoutTab profile={profile} userData={userData} saveData={saveData}/>}
+        {activeTab==="nutrition"&&<NutritionTab profile={profile} userData={userData} saveData={saveData}/>}
+        {activeTab==="ai"&&<AICoachTab profile={profile} userData={userData}/>}
+        {activeTab==="sleep"&&<SleepTab profile={profile} userData={userData} saveData={saveData}/>}
+        {activeTab==="water"&&<WaterTab profile={profile} userData={userData} saveData={saveData}/>}
+        {activeTab==="steps"&&<StepsTab userData={userData} saveData={saveData}/>}
+        {activeTab==="progress"&&<ProgressTab profile={profile} userData={userData}/>}
+        {activeTab==="settings"&&<SettingsTab profile={profile} userData={userData} saveData={saveData} sub={sub} user={user}/>}
+        {activeTab==="more"&&(
+          <div style={{padding:"0 16px 100px"}}>
+            <div style={{fontWeight:700,fontSize:18,marginBottom:16}}>More Features</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {MORE_TABS.map(t=><Card key={t.id} onClick={()=>setActiveTab(t.id)} style={{textAlign:"center",cursor:"pointer",padding:"20px 16px"}}><div style={{fontSize:32,marginBottom:8}}>{t.icon}</div><div style={{fontWeight:700,fontSize:"14px"}}>{t.label}</div></Card>)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {isMoreTab&&<button onClick={()=>setActiveTab("more")} style={{position:"fixed",top:56,left:20,zIndex:50,background:T.bg3,border:`1px solid ${T.border}`,color:T.muted,borderRadius:T.r,padding:"6px 12px",fontSize:"12px",cursor:"pointer",fontFamily:T.font}}>← Back</button>}
+
+      {/* Bottom Nav */}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:`${T.bg2}f0`,backdropFilter:"blur(16px)",borderTop:`1px solid ${T.border}`,display:"flex",padding:"8px 0 24px",zIndex:200}}>
+        {TABS.map(t=>{
+          const isActive=t.id==="more"?(activeTab==="more"||isMoreTab):activeTab===t.id;
+          return(
+            <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,fontFamily:T.font}}>
+              <div style={{fontSize:22,filter:isActive?"none":"grayscale(0.5)",opacity:isActive?1:0.6}}>{t.icon}</div>
+              <div style={{fontSize:"10px",fontWeight:700,color:isActive?T.purple:T.dim,letterSpacing:".3px"}}>{t.label}</div>
+              {isActive&&<div style={{width:4,height:4,borderRadius:"50%",background:T.purple}}/>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<FitPro/>);
+  </script>
+</body>
+</html>
